@@ -568,8 +568,8 @@ async def trade_for_user(uid, bot=None, broadcast=False):
                 sig = await compute_signal(ex, s)
                 if not sig.ok:
                     if broadcast:
-                        await _notify(uid, f"⏸ {s}: {sig.reason}")
+                        await _notify(uid,  "wait " + str(s) + ": " + str(sig.reason))
                     continue
 
                 if broadcast:
-                    await _notify(uid, f"🔎 {s} {sig.side} {sig.confidence}/10\n{sig.reason}"
+                    await _notify(uid, "scan: " + str(s) + " " + str(sig.side) + " " + str(sig.confidence) + "/10 " + str(sig.reason))
