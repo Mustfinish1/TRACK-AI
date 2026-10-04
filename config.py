@@ -473,4 +473,152 @@ def settle_payment(uid, inv_id, tx, received):
             dup = c.execute("SELECT 1 FROM invoices WHERE tx_hash=? AND invoice_id<>?",
                             (tx, inv_id)).fetchone()
             if dup:
-       
+                c.rollback(); return False, "TX already used"
+            tier = inv["tier"]
+            days = TIERS[tier]["days"]
+            exp = now_utc() + timedelta(days=days)
+            c.execute("UPDATE users SET license_tier=?, expiry=? WHERE user_id=?",
+                      (tier, exp.isoformat(), uid))
+            c.execute("UPDATE invoices SET status='PAID', tx_hash=?, exact_amount=? WHERE invoice_id=?",
+                      (tx, str(received), inv_id))
+            c.commit()
+            return True, {"tier": tier, "expiry": exp, "days": days}
+        except Exception:
+            c.rollback()
+            log.exception("settle_payment")
+            return False, "DB error"
+
+
+# ---------------- TRC20 ----------------
+_HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
+_B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+
+def _b58encode(b):
+    n = int.from_bytes(b, "big")
+    out = ""
+    while n > 0:
+        n, r = divmod(n, 58)
+        out = _B58[r] + out
+    pad = 0
+    for x in b:
+        if x == 0:
+            pad += 1
+        else:
+            break
+    return "1" * pad + (out or "")
+
+
+def _hex_to_tron(hex_addr):
+    hex_addr = hex_addr.lower().replace("0x", "")
+    if len(hex_addr) == 42 and hex_addr.startswith("41"):
+        raw = bytes.fromhex(hex_addr)
+    elif len(hex_addr) == 40:
+        raw = b"\x41" + bytes.fromhex(hex_addr)
+    else:
+        raise ValueError("bad hex")
+    checksum = hashlib.sha256(hashlib.sha256(raw).digest()).digest()[:4]
+    return _b58encode(raw + checksum)
+
+
+def _normalize_addr(a):
+    if not a:
+        return ""
+    a = a.strip()
+    if a.startswith("T") and len(a) == 34:
+        return a
+    if re.fullmatch(r"(0x)?[0-9a-fA-F]{40,42}", a):
+        try:
+            return _hex_to_tron(a)
+        except Exception:
+            return a
+    return a
+
+
+async def _tron_post(session, url, payload):
+    headers = {"TRON-PRO-API-KEY": TRONGRID_API_KEY} if TRONGRID_API_KEY else {}
+    async with session.post(url, json=payload, headers=headers,
+                            timeout=aiohttp.ClientTimeout(total=15)) as r:
+        return await r.json()
+
+
+async def _tron_get(session, url):
+    headers = {"TRON-PRO-API-KEY": TRONGRID_API_KEY} if TRONGRID_API_KEY else {}
+    async with session.get(url, headers=headers,
+                           timeout=aiohttp.ClientTimeout(total=15)) as r:
+        return await r.json()
+
+
+async def verify_trc20_usdt(tx_hash, expected, wallet):
+    tx_hash = (tx_hash or "").strip()
+    wallet = (wallet or "").strip()
+    expected = to_dec(expected or 0)
+    if not _HEX64.match(tx_hash):
+        return False, Decimal(0), "Invalid TX hash"
+    if not (wallet.startswith("T") and len(wallet) == 34):
+        return False, Decimal(0), "Wallet misconfigured"
+
+    try:
+        async with aiohttp.ClientSession() as s:
+            info = await _tron_post(s, f"{TRONGRID_API}/wallet/gettransactioninfobyid", {"value": tx_hash})
+            if not info or not info.get("id"):
+                return False, Decimal(0), "TX not found on Tron"
+            receipt = info.get("receipt") or {}
+            if receipt.get("result") not in (None, "", "SUCCESS"):
+                return False, Decimal(0), f"TX failed: {receipt.get('result')}"
+            tx_block = info.get("blockNumber")
+            if not tx_block:
+                return False, Decimal(0), "TX not mined yet"
+            now_blk = await _tron_post(s, f"{TRONGRID_API}/wallet/getnowblock", {})
+            current = ((now_blk.get("block_header") or {}).get("raw_data") or {}).get("number", 0) or 0
+            confs = max(0, current - int(tx_block))
+            if confs < TRON_CONFIRMATIONS:
+                return False, Decimal(0), f"{confs}/{TRON_CONFIRMATIONS} confs — retry"
+
+            ev = await _tron_get(s, f"{TRONGRID_API}/v1/transactions/{tx_hash}/events?only_confirmed=true")
+            received = None
+            for e in (ev or {}).get("data", []):
+                if (e.get("event_name") or "").lower() != "transfer":
+                    continue
+                if (e.get("contract_address") or "").lower() != USDT_TRC20_CONTRACT.lower():
+                    continue
+                res = e.get("result") or {}
+                to_raw = res.get("to") or res.get("1")
+                val_raw = res.get("value") or res.get("2")
+                if _normalize_addr(to_raw or "") != wallet:
+                    continue
+                try:
+                    received = Decimal(int(val_raw)) / (Decimal(10) ** USDT_DECIMALS)
+                except Exception:
+                    continue
+                break
+
+            if received is None:
+                for e in (info.get("log") or []):
+                    if (e.get("address") or "").lower() != USDT_TRC20_CONTRACT.lower():
+                        continue
+                    topics = e.get("topics") or []
+                    if len(topics) < 3:
+                        continue
+                    try:
+                        to_addr = _hex_to_tron("41" + topics[2][-40:])
+                    except Exception:
+                        continue
+                    if to_addr != wallet:
+                        continue
+                    try:
+                        v = int(e.get("data") or "0", 16)
+                        received = Decimal(v) / (Decimal(10) ** USDT_DECIMALS)
+                        break
+                    except Exception:
+                        continue
+
+            if received is None:
+                return False, Decimal(0), "No USDT Transfer to our wallet in this TX"
+            tol = max(Decimal("0.01"), expected * Decimal("0.005"))
+            if received + tol < expected:
+                return False, received, f"Underpaid: {received} < {expected}"
+            return True, received, f"OK — {received} USDT, {confs} confs"
+    except Exception:
+        log.exception("verify_trc20_usdt")
+        return False, Decimal(0), "Verification error"
