@@ -91,6 +91,7 @@ SYMBOLS = {
     "ELITE": ["BTC/USDT", "ETH/USDT", "SOL/USDT", "LINK/USDT",
               "BNB/USDT", "XRP/USDT", "ADA/USDT"],
 }
+SYMBOLS["ADMIN"] = SYMBOLS["ELITE"]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -272,6 +273,11 @@ def create_user(uid, username, ref_code=None):
 
 
 def license_info(uid):
+    # --- ADMIN OVERRIDE ---
+    if uid in ADMIN_IDS:
+        return {"valid": True, "tier": "ADMIN", "expiry": "FOREVER"}
+    # -----------------------
+
     with db() as c:
         u = c.execute("SELECT license_tier, expiry FROM users WHERE user_id=?", (uid,)).fetchone()
     if not u:
