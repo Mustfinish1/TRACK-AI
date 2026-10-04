@@ -731,7 +731,7 @@ def main():
     if os.getenv("PORT"):
         threading.Thread(target=_start_health_server, daemon=True).start()
 
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).concurrent_updates(True).build()
 
     handlers = [
         ("start", start), ("trial", trial_cmd), ("buy", buy_cmd),
