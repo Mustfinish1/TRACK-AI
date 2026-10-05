@@ -236,13 +236,13 @@ def make_exchange(keys=None, exchange_name=None, sandbox=None):
             opts["password"] = keys.get("password") or ""
 
     # OKX demo requires this header inside options so CCXT actually sends it.
-   if sandbox and name == "okx":
-    opts["options"]["headers"] = {"x-simulated-trading": "1"}
+    if sandbox and name == "okx":
+        opts["options"]["headers"] = {"x-simulated-trading": "1"}
 
-   if name == "binance":
-    ex = ccxt.binance(opts)
-else:
-    ex = ccxt.okx(opts)
+    if name == "binance":
+        ex = ccxt.binance(opts)
+    else:
+        ex = ccxt.okx(opts)
 
     if sandbox and name == "binance":
         try:
