@@ -182,13 +182,8 @@ async def compute_signal(ex, symbol):
         return Signal(False, reason="signal error", symbol=symbol)
 
 def _prep_exchange(keys):
-    ex = make_exchange(keys, keys.get("exchange"))
-    ex.timeout = 15000  # 15 second max per API call
-    if SANDBOX:
-        try:
-            ex.set_sandbox_mode(True)
-        except Exception as e:
-            log.warning(f"sandbox: {e}")
+    ex = make_exchange(keys, keys.get("exchange"), sandbox=SANDBOX)
+    ex.timeout = 15000
     return ex
 
 def _round_amount(ex, symbol, amount):
