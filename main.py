@@ -189,6 +189,7 @@ async def setkeys_cmd(update, context):
     if not rate_ok(f"setkeys:{uid}"):
         await _safe_reply(update.message, "⏳ Wait a minute")
         return
+
     parsed = detect_exchange_args(context.args or [])
     if not parsed:
         await _safe_reply(update.message,
@@ -196,7 +197,8 @@ async def setkeys_cmd(update, context):
                           "`/setkeys binance KEY SECRET`",
                           parse_mode="Markdown")
         return
-        exchange, ak, sec, pp = parsed
+
+    exchange, ak, sec, pp = parsed
     keys = {"exchange": exchange, "apiKey": ak, "secret": sec, "password": pp}
     ex = make_exchange(keys, exchange)
     if SANDBOX:
