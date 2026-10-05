@@ -198,14 +198,9 @@ async def setkeys_cmd(update, context):
                           parse_mode="Markdown")
         return
 
-    exchange, ak, sec, pp = parsed
+        exchange, ak, sec, pp = parsed
     keys = {"exchange": exchange, "apiKey": ak, "secret": sec, "password": pp}
-    ex = make_exchange(keys, exchange)
-    if SANDBOX:
-        try:
-            ex.set_sandbox_mode(True)
-        except Exception:
-            pass
+    ex = make_exchange(keys, exchange, sandbox=SANDBOX)
     try:
         await ex.load_markets()
         bal = await ex.fetch_balance()
