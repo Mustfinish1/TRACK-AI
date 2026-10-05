@@ -198,7 +198,7 @@ async def setkeys_cmd(update, context):
                           parse_mode="Markdown")
         return
 
-        exchange, ak, sec, pp = parsed
+    exchange, ak, sec, pp = parsed
     keys = {"exchange": exchange, "apiKey": ak, "secret": sec, "password": pp}
     ex = make_exchange(keys, exchange, sandbox=SANDBOX)
     try:
