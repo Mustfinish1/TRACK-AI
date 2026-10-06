@@ -379,6 +379,7 @@ async def _open_position(uid, ex, sig, keys_exchange=None):
     ok, o, px = await _place(ex, sig.symbol, side, amount)
     if not ok:
         log_trade(uid, sig.symbol, sig.side, amount, 0, "", "ERROR", o)
+        await _notify(uid, f"❌ Order failed {sig.symbol}: {o}")
         return False
     px = px or sig.price
     rpu = abs(px - sig.sl)
