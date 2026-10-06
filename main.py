@@ -201,6 +201,7 @@ async def setkeys_cmd(update, context):
     exchange, ak, sec, pp = parsed
     keys = {"exchange": exchange, "apiKey": ak, "secret": sec, "password": pp}
     ex = make_exchange(keys, exchange, sandbox=SANDBOX)
+    ex.timeout = 15000
     try:
         await ex.load_markets()
         bal = await ex.fetch_balance()
