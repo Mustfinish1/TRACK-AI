@@ -268,6 +268,9 @@ async def _cancel_native_sl(ex, symbol, order_id):
         await ex.cancel_order(order_id, symbol)
         return True
     except Exception as e:
+        msg = str(e).lower()
+        if "order does not exist" in msg or "already" in msg or "not found" in msg:
+            return True
         log.warning("cancel native SL failed: " + str(e))
         try:
             await ex.cancel_all_orders(symbol)
@@ -430,23 +433,60 @@ async def _close_position(uid, ex, pos, reason, price, amount=None, tranche=0):
     remaining = float(pos["size"] or 0)
     if remaining <= 0:
         return False
+
     close_amt = remaining if amount is None else min(amount, remaining)
     close_amt = _round_amount(ex, pos["symbol"], close_amt)
     if close_amt <= 0:
         return False
+
+    # Cancel native SL FIRST so exchange releases the locked funds
+    native_sl_id = pos["native_sl_id"] or ""
+    if native_sl_id:
+        await _cancel_native_sl(ex, pos["symbol"], native_sl_id)
+        await asyncio.sleep(1.0)
+
+    # Check what the exchange actually has
+    actual_free = 0.0
+    try:
+        bal = await ex.fetch_balance()
+        free = bal.get("free") or {}
+        base = pos["symbol"].split("/")[0]
+        actual_free = float(free.get(base, 0) or 0)
+    except Exception as e:
+        log.warning("balance check failed: " + str(e))
+
+    # If exchange has basically nothing, SL already fired - mark closed
+    if actual_free <= 0 or actual_free < close_amt * 0.5:
+        with db() as c:
+            c.execute("UPDATE positions SET open=0, closed_at=?, native_sl_id='', native_sl_price=0 WHERE id=?",
+                      (now_utc().isoformat(), pos["id"]))
+            c.commit()
+        await _notify(uid, pos["symbol"] + " already closed on exchange")
+        return True
+
+    # Cap close amount to actual free balance
+    if close_amt > actual_free:
+        close_amt = _round_amount(ex, pos["symbol"], actual_free)
+    if close_amt <= 0:
+        return False
+
     side = "sell" if pos["side"] == "LONG" else "buy"
     ok, o, px = await _place(ex, pos["symbol"], side, close_amt)
     if not ok:
         await _notify(uid, "Close failed: " + str(o))
+        try:
+            await _place_native_sl(ex, ex.id, pos["symbol"], pos["side"], remaining, float(pos["sl"] or price))
+        except Exception as e:
+            log.warning("SL restore failed: " + str(e))
         return False
+
     px = px or price
     pnl = (px - pos["entry_price"]) * close_amt
     if pos["side"] == "SHORT":
         pnl = -pnl
+
     new_size = remaining - close_amt
-    native_sl_id = pos["native_sl_id"] or ""
-    if native_sl_id and new_size <= 1e-12:
-        await _cancel_native_sl(ex, pos["symbol"], native_sl_id)
+
     with db() as c:
         c.execute("UPDATE positions SET size=?, pnl=pnl+?, tranche_hit=? WHERE id=?",
                   (new_size, pnl, max(int(pos["tranche_hit"] or 0), tranche), pos["id"]))
@@ -461,6 +501,7 @@ async def _close_position(uid, ex, pos, reason, price, amount=None, tranche=0):
             else:
                 c.execute("UPDATE users SET consecutive_losses=0 WHERE user_id=?", (uid,))
         c.commit()
+
     log_trade(uid, pos["symbol"], pos["side"], close_amt, px, o.get("id", ""), "CLOSE_" + reason)
     await _notify(uid, reason + " " + pos["symbol"] + " @ " + str(px) + " PnL $" + str(round(pnl, 2)))
     if new_size <= 1e-12 and pnl > 0:
