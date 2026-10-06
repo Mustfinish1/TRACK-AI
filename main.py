@@ -575,6 +575,15 @@ async def backupnow_cmd(update, context):
     except Exception as e:
         await _safe_reply(update.message, f"❌ {e}")
 
+async def resetpos_cmd(update, context):
+    if not is_admin(update.effective_user.id):
+        await _safe_reply(update.message, "❌ Not admin")
+        return
+    with db() as c:
+        c.execute("UPDATE positions SET open=0, pnl=0 WHERE open=1")
+        c.commit()
+    await _safe_reply(update.message, "✅ Cleared all ghost positions")
+
 
 async def broadcast_cmd(update, context):
     if not is_admin(update.effective_user.id):
