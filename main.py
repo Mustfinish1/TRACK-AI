@@ -673,7 +673,7 @@ async def verify_cmd(update, context):
 HELP_TEXT = (
     "🆘 *Help*\n\n"
     "/start /buy /trial /setkeys /trade /signals /positions /balance\n"
-    "/status /settings /close SYMBOL /referral /leaderboard /share\n"
+    "/status /settings /close /SYMBOL /referral /leaderboard /share\n"
     "/pause /resume /verify"
 )
 
@@ -751,7 +751,7 @@ def main():
         ("positions", positions_cmd), ("balance", balance_cmd),
         ("users", users_cmd), ("stats", stats_cmd), ("admin", admin_cmd),
         ("pendingrefs", pendingrefs_cmd), ("backupnow", backupnow_cmd),
-        ("broadcast", broadcast_cmd), ("checktx", checktx_cmd),
+        ("broadcast", broadcast_cmd), ("resetpos", resetpos_cmd), ("checktx", checktx_cmd),
         ("verify", verify_cmd), ("referral", referral_cmd), ("status", status_cmd),
         ("settings", settings_cmd), ("close", close_cmd),
         ("leaderboard", leaderboard_cmd), ("share", share_cmd),
